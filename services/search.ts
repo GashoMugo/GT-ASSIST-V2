@@ -1,4 +1,5 @@
 import { validateTavilyResponse, validateBraveResponse } from './toolOutputValidation';
+import { authHeaders } from './authToken';
 
 export class SearchService {
   private apiKey: string;
@@ -25,6 +26,7 @@ export class SearchService {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(await authHeaders()),
         },
         body: JSON.stringify({
           provider: 'tavily',
@@ -68,6 +70,7 @@ export class SearchService {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(await authHeaders()),
         },
         body: JSON.stringify({
           provider: 'brave',

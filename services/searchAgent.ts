@@ -23,6 +23,7 @@ export interface SearchResult {
 }
 
 import { SearchSource } from '../types';
+import { authHeaders } from './authToken';
 import { validateTavilyResponse, validateBraveResponse, formatErrors } from './toolOutputValidation';
 import { getCachedSearch, setCachedSearch } from './queryCache';
 import { getAppUserContext } from './userContext';
@@ -275,6 +276,7 @@ export class SearchAgent {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                ...(await authHeaders()),
             },
             body: JSON.stringify({
                 provider: 'tavily',
@@ -315,6 +317,7 @@ export class SearchAgent {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                ...(await authHeaders()),
             },
             body: JSON.stringify({
                 provider: 'brave',
