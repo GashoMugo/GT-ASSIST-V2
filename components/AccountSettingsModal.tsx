@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Modal, Input, Label, Textarea, Button, Select } from './UI';
-import { AppSettings, AVAILABLE_VOICES, AVAILABLE_MODELS, DEFAULT_SYSTEM_PROMPT } from '../types';
+import { AppSettings, AVAILABLE_VOICES, AVAILABLE_MODELS, DEFAULT_CHAT_PROVIDER, DEFAULT_SYSTEM_PROMPT } from '../types';
+import { testOpenRouterKey } from '../services/openrouter';
+import { getOpenRouterKey, setOpenRouterKey, clearOpenRouterKey, maskOpenRouterKey } from '../services/openrouterKey';
 import {
     User,
     Settings,
@@ -34,6 +36,25 @@ export const AccountSettingsModal: React.FC<AccountSettingsModalProps> = ({ isOp
     const [formData, setFormData] = useState<AppSettings>(settings);
     const [isCustomModel, setIsCustomModel] = useState(!AVAILABLE_MODELS.some(m => m.id === settings.model));
     const [error, setError] = useState<string | null>(null);
+    const [orKey, setOrKey] = useState(() => getOpenRouterKey());
+    const [orKeyStatus, setOrKeyStatus] = useState<string | null>(null);
+    const [orKeyBusy, setOrKeyBusy] = useState(false);
+
+    const saveOpenRouterKey = (value: string) => {
+        setOrKey(value);
+        setOpenRouterKey(value); // localStorage only — never leaves this device except the header
+        setOrKeyStatus(null);
+    };
+
+    const handleTestOpenRouterKey = async () => {
+        if (!orKey.trim()) return;
+        setOrKeyBusy(true);
+        const result = await testOpenRouterKey(orKey);
+        setOrKeyStatus(result.message);
+        setOrKeyBusy(false);
+    };
+
+    const providerValue = formData.provider ?? DEFAULT_CHAT_PROVIDER;
 
     const isPro = subscriptionTier === 'pro';
     const isPlus = subscriptionTier === 'plus' || isPro;
@@ -300,6 +321,7 @@ export const AccountSettingsModal: React.FC<AccountSettingsModalProps> = ({ isOp
                             </div>
 
                             <div className="space-y-6 pt-4">
+                                {providerValue === 'chutes' && (
                                 <div className="space-y-2">
                                     <Label>Preferred Model</Label>
                                     <Select
@@ -320,6 +342,69 @@ export const AccountSettingsModal: React.FC<AccountSettingsModalProps> = ({ isOp
                                             placeholder="e.g. user/model-name"
                                             className="mt-2"
                                         />
+                                    )}
+                                </div>
+                                )}
+
+                                <div className="space-y-2">
+                                    <Label>AI Provider</Label>
+                                    <div className="grid grid-cols-1 gap-2">
+                                        {[
+                                            { id: 'chutes' as const, label: 'GashoTech (Chutes)', desc: 'Included with your app credits' },
+                                            { id: 'openrouter-free' as const, label: 'OpenRouter — Free models', desc: 'Free and stealth models on a shared daily limit — default' },
+                                            { id: 'openrouter-byok' as const, label: 'OpenRouter — my own key', desc: 'Same free models, on your own rate limit' },
+                                        ].map((option) => (
+                                            <button
+                                                key={option.id}
+                                                type="button"
+                                                onClick={() => handleChange('provider', option.id)}
+                                                className={`text-left p-3 rounded-xl border transition-all ${providerValue === option.id
+                                                    ? 'bg-primary/10 border-primary text-primary shadow-inner'
+                                                    : 'bg-transparent border-gray-100 dark:border-white/5 text-gray-600 dark:text-gray-400 hover:border-gray-200'
+                                                    }`}
+                                            >
+                                                <div className="flex items-center gap-2 text-sm font-bold">
+                                                    {providerValue === option.id && <Sparkles className="w-3.5 h-3.5 fill-current" />}
+                                                    {option.label}
+                                                </div>
+                                                <div className="text-[10px] text-gray-500 dark:text-gray-500 mt-0.5">{option.desc}</div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                    {providerValue === 'openrouter-free' && (
+                                        <p className="text-[10px] text-gray-400 dark:text-gray-500">
+                                            If free mode is not configured on the server yet, add your own OpenRouter key instead.
+                                        </p>
+                                    )}
+                                    {providerValue === 'openrouter-byok' && (
+                                        <div className="space-y-2 p-3 rounded-xl bg-gray-50/50 dark:bg-white/5 border border-dashed border-gray-200 dark:border-white/10">
+                                            <Label>OpenRouter API Key</Label>
+                                            <Input
+                                                type="password"
+                                                value={orKey}
+                                                onChange={(e) => saveOpenRouterKey(e.target.value)}
+                                                placeholder="sk-or-v1-..."
+                                                autoComplete="off"
+                                                spellCheck={false}
+                                            />
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <Button type="button" size="sm" variant="secondary" onClick={handleTestOpenRouterKey} disabled={!orKey.trim() || orKeyBusy}>
+                                                    {orKeyBusy ? 'Testing…' : 'Test'}
+                                                </Button>
+                                                <Button type="button" size="sm" variant="destructive" onClick={() => { setOrKey(''); clearOpenRouterKey(); setOrKeyStatus(null); handleChange('provider', 'openrouter-free'); }} disabled={!orKey}>
+                                                    Remove
+                                                </Button>
+                                                {orKey && (
+                                                    <span className="text-[10px] font-bold text-gray-500">Stored on this device: {maskOpenRouterKey(orKey)}</span>
+                                                )}
+                                            </div>
+                                            {orKeyStatus && <p className="text-[10px] font-bold text-primary">{orKeyStatus}</p>}
+                                            {!orKey && (
+                                                <p className="text-[10px] text-amber-600 dark:text-amber-400">
+                                                    No key saved yet — chats still use the shared free pool and cost credits until you add one.
+                                                </p>
+                                            )}
+                                        </div>
                                     )}
                                 </div>
 

@@ -1,6 +1,9 @@
 import React from 'react';
 import { X } from 'lucide-react';
-import { AppSettings, AVAILABLE_MODELS, BRAND_STUDIO_MODEL_ID, BRAND_VISION_MODEL_IDS, getModelShortName } from '../types';
+import { AppSettings, AVAILABLE_MODELS, BRAND_STUDIO_MODEL_ID, BRAND_VISION_MODEL_IDS, ChatProvider, DEFAULT_CHAT_PROVIDER, getModelShortName } from '../types';
+import { fetchOpenRouterModels, type OpenRouterModel } from '../services/openrouter';
+import { getOpenRouterKey } from '../services/openrouterKey';
+import { Button } from './UI';
 
 type ChatMode = 'chat' | 'brand';
 
@@ -11,6 +14,8 @@ type LogoModelPickerProps = {
   onChatModeChange: (mode: ChatMode) => void;
   settings: AppSettings;
   onUpdateSettings: (patch: Partial<AppSettings>) => void;
+  isAuthenticated: boolean;
+  onRequestAuth: () => void;
   anchorRect?: DOMRect | null;
   anchorEl?: HTMLElement | null;
 };
@@ -22,6 +27,8 @@ export const LogoModelPicker: React.FC<LogoModelPickerProps> = ({
   onChatModeChange,
   settings,
   onUpdateSettings,
+  isAuthenticated,
+  onRequestAuth,
   anchorRect,
   anchorEl,
 }) => {
@@ -31,6 +38,20 @@ export const LogoModelPicker: React.FC<LogoModelPickerProps> = ({
     && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
   const isMobile = typeof window !== 'undefined'
     && window.matchMedia('(max-width: 639px)').matches;
+
+  const provider = chatMode === 'brand' ? 'chutes' : (settings.provider ?? DEFAULT_CHAT_PROVIDER);
+  const [orModels, setOrModels] = React.useState<OpenRouterModel[] | null>(null);
+  const [orError, setOrError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!isOpen || provider === 'chutes' || !isAuthenticated) return;
+    let cancelled = false;
+    setOrError(null);
+    fetchOpenRouterModels(provider === 'openrouter-byok' ? getOpenRouterKey() : '')
+      .then((models) => { if (!cancelled) setOrModels(models); })
+      .catch((err: Error) => { if (!cancelled) setOrError(err.message); });
+    return () => { cancelled = true; };
+  }, [isOpen, provider, isAuthenticated]);
 
   React.useEffect(() => {
     if (!isOpen) return;
@@ -57,22 +78,96 @@ export const LogoModelPicker: React.FC<LogoModelPickerProps> = ({
 
   if (!isOpen) return null;
 
+  const usesOpenRouter = provider !== 'chutes';
   const brandModelId = settings.brandModel || BRAND_STUDIO_MODEL_ID;
-  const activeModelId = chatMode === 'brand' ? brandModelId : settings.model;
-  const activeShortName = getModelShortName(activeModelId);
+  const activeModelId = chatMode === 'brand'
+    ? brandModelId
+    : usesOpenRouter
+      ? (settings.openrouterModel || '')
+      : settings.model;
 
   const brandModels = BRAND_VISION_MODEL_IDS.map((id) => AVAILABLE_MODELS.find((m) => m.id === id)).filter(Boolean) as Array<
     (typeof AVAILABLE_MODELS)[number]
   >;
 
-  const listModels = chatMode === 'brand' ? brandModels : AVAILABLE_MODELS;
+  type PickerModel = { id: string; shortName: string; badge?: string };
+  const hasKey = Boolean(getOpenRouterKey());
+  // Both modes get the server's allowlist, so every row is Free or Stealth.
+  const hasStealth = usesOpenRouter && (orModels ?? []).some((m) => m.stealth);
+  const listModels: PickerModel[] = !isAuthenticated
+    ? []
+    : chatMode === 'brand'
+      ? brandModels
+      : usesOpenRouter
+        ? (orModels ?? []).map((m) => ({ id: m.id, shortName: m.name || m.id, badge: m.stealth ? 'Stealth' : 'Free' }))
+        : AVAILABLE_MODELS;
+
+  // F2: the dropdown is the provider switch — it edits the same saved setting
+  // the Settings page does, so there is one source of truth.
+  const providerOptions: Array<{ id: ChatProvider; label: string }> = [
+    { id: 'chutes', label: 'GashoTech Chutes' },
+    { id: 'openrouter-free', label: 'OpenRouter Free' },
+    ...(hasKey ? [{ id: 'openrouter-byok' as const, label: 'OpenRouter — my key' }] : []),
+  ];
+  const providerPanel = chatMode === 'brand' ? null : (
+    <div className="px-3 pb-2">
+      <div className="px-1 pb-1 text-[10px] font-black uppercase tracking-widest text-slate-400">Provider</div>
+      <div className="grid grid-cols-1 gap-1">
+        {providerOptions.map((option) => {
+          const selected = provider === option.id;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => {
+                if (!isAuthenticated) { onClose(); onRequestAuth(); return; }
+                onUpdateSettings({ provider: option.id });
+              }}
+              className={`w-full text-left px-3 py-1.5 rounded-xl border text-[11px] font-black transition-colors ${selected
+                ? 'bg-primary/10 border-primary/20 text-primary'
+                : 'bg-white/40 dark:bg-white/5 border-white/40 dark:border-white/10 text-slate-700 dark:text-slate-200 hover:bg-black/5 dark:hover:bg-white/10'
+                }`}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+        {!hasKey && (
+          <button
+            type="button"
+            onClick={() => { onClose(); window.dispatchEvent(new CustomEvent('open-account-settings')); }}
+            className="w-full text-left px-3 py-1.5 rounded-xl text-[11px] font-bold text-primary hover:bg-primary/5"
+          >
+            Add your key in Settings
+          </button>
+        )}
+      </div>
+    </div>
+  );
+  const signInNotice = (
+    <div className="px-4 pb-4 pt-1 text-center space-y-2">
+      <p className="text-[12px] text-slate-500 dark:text-slate-300">Sign in to see models</p>
+      <p className="text-[13px] font-bold text-slate-800 dark:text-slate-100">Sign in to start chatting — it's free</p>
+      <Button size="sm" onClick={() => { onClose(); onRequestAuth(); }}>Sign In</Button>
+    </div>
+  );
+
+  const activeShortName = usesOpenRouter
+    ? (listModels.find((m) => m.id === activeModelId)?.shortName || activeModelId)
+    : getModelShortName(activeModelId);
+  const headerSubtitle = !isAuthenticated
+    ? 'Sign in to see models'
+    : usesOpenRouter && listModels.length === 0
+      ? (orError || 'Loading models…')
+      : (activeShortName || activeModelId || 'Select a model');
+
   const onSelectModel = (modelId: string) => {
     if (chatMode === 'brand') {
       onUpdateSettings({ brandModel: modelId });
       onClose();
       return;
     }
-    onUpdateSettings({ model: modelId });
+    onUpdateSettings(usesOpenRouter ? { openrouterModel: modelId } : { model: modelId });
     onClose();
   };
 
@@ -99,8 +194,13 @@ export const LogoModelPicker: React.FC<LogoModelPickerProps> = ({
             <div className="min-w-0">
               <div className="text-xs font-black text-slate-900 dark:text-white tracking-tight">Model</div>
               <div className="text-[11px] text-slate-500 dark:text-slate-300 truncate">
-                Active: <span className="font-semibold text-primary">{activeShortName || activeModelId}</span>
+                Active: <span className="font-semibold text-primary">{headerSubtitle}</span>
               </div>
+              {hasStealth && (
+                <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                  Stealth = free, may log prompts for training.
+                </div>
+              )}
             </div>
             <button
               type="button"
@@ -137,6 +237,8 @@ export const LogoModelPicker: React.FC<LogoModelPickerProps> = ({
             </div>
           </div>
 
+          {providerPanel}
+          {!isAuthenticated && signInNotice}
           <div className="px-2 pb-3 overflow-y-auto custom-scrollbar" style={{ maxHeight: 'calc(min(70vh, 34rem) - 6.25rem)' }}>
             <div className="grid grid-cols-1 gap-1 px-1">
               {listModels.map((m) => {
@@ -191,8 +293,13 @@ export const LogoModelPicker: React.FC<LogoModelPickerProps> = ({
             <div className="min-w-0">
               <div className="text-xs font-black text-slate-900 dark:text-white tracking-tight">Model</div>
               <div className="text-[11px] text-slate-500 dark:text-slate-300 truncate">
-                Active: <span className="font-semibold text-primary">{activeShortName || activeModelId}</span>
+                Active: <span className="font-semibold text-primary">{headerSubtitle}</span>
               </div>
+              {hasStealth && (
+                <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                  Stealth = free, may log prompts for training.
+                </div>
+              )}
             </div>
             <button
               type="button"
@@ -229,6 +336,8 @@ export const LogoModelPicker: React.FC<LogoModelPickerProps> = ({
             </div>
           </div>
 
+          {providerPanel}
+          {!isAuthenticated && signInNotice}
           <div className="px-2 pb-3 overflow-y-auto custom-scrollbar flex-1">
             <div className="grid grid-cols-1 gap-1 px-1">
               {listModels.map((m) => {
@@ -277,7 +386,7 @@ export const LogoModelPicker: React.FC<LogoModelPickerProps> = ({
           <div className="min-w-0">
             <div className="text-xs font-black text-slate-900 dark:text-white tracking-tight">Select model</div>
             <div className="text-[11px] text-slate-500 dark:text-slate-300 truncate">
-              Active: <span className="font-semibold text-primary">{activeShortName || activeModelId}</span>
+              Active: <span className="font-semibold text-primary">{headerSubtitle}</span>
             </div>
           </div>
           <button
@@ -315,6 +424,8 @@ export const LogoModelPicker: React.FC<LogoModelPickerProps> = ({
           </div>
         </div>
 
+        {providerPanel}
+        {!isAuthenticated && signInNotice}
         <div className="px-2 pb-4 overflow-y-auto max-h-[calc(82vh-7.75rem)] custom-scrollbar">
           <div className="grid grid-cols-1 gap-1 px-2">
             {listModels.map((m) => {

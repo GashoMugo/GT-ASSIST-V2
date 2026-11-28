@@ -1,6 +1,6 @@
 import React from 'react';
 import { Bot, Camera } from 'lucide-react';
-import { AppSettings, BRAND_STUDIO_MODEL_ID, Message, ContentPart, getModelInfo, getModelShortName } from '../../types';
+import { AppSettings, BRAND_STUDIO_MODEL_ID, DEFAULT_CHAT_PROVIDER, Message, ContentPart, getModelInfo, getModelShortName } from '../../types';
 import { MessageRow } from './MessageRow';
 
 type MessageListProps = {
@@ -54,9 +54,16 @@ export const MessageList: React.FC<MessageListProps> = ({
   renderMessageContent,
   formatModelName,
 }) => {
-  const activeModelId = chatMode === 'brand' ? (settings.brandModel || BRAND_STUDIO_MODEL_ID) : settings.model;
+  // Same provider rule as the header: OpenRouter Free is the default, so the
+  // welcome pill must not advertise a Chutes model the send path won't use.
+  const provider = chatMode === 'brand' ? 'chutes' : (settings.provider ?? DEFAULT_CHAT_PROVIDER);
+  const activeModelId = chatMode === 'brand'
+    ? (settings.brandModel || BRAND_STUDIO_MODEL_ID)
+    : provider === 'chutes'
+      ? settings.model
+      : (settings.openrouterModel || 'OpenRouter');
   const activeModelShortName = getModelShortName(activeModelId);
-  const activeModelSupportsVision = Boolean(getModelInfo(activeModelId)?.supportsVision);
+  const activeModelSupportsVision = provider === 'chutes' && Boolean(getModelInfo(activeModelId)?.supportsVision);
 
   return (
     <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-1 xs:p-2 sm:p-6 space-y-3 xs:space-y-4 sm:space-y-8 scroll-smooth custom-scrollbar">

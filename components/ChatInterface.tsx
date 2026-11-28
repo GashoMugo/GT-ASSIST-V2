@@ -8,7 +8,6 @@ import remarkGfm from 'remark-gfm';
 import { KnowledgeBaseService } from '../services/knowledgeBase';
 import { KnowledgeBaseModal } from './KnowledgeBaseModal';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
-import { CreditAwareButton } from './CreditAwareButton';
 import { useCredits } from '../context/CreditContext';
 import { useAuthContext } from '../context/AuthContext';
 import { useServices } from '../context/ServicesContext';

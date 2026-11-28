@@ -87,5 +87,28 @@ export function getCreditCost(action: keyof typeof CREDIT_COSTS, model?: string)
 // Default credit balance for new users
 export const DEFAULT_CREDITS = 10;
 
+/**
+ * Chat credit policy (owner decision 2026-11-27): the two GashoTech-keyed
+ * providers (Chutes, OpenRouter Free) bill the normal chat cost; a BYO
+ * OpenRouter key bills nothing. `label` goes in the ledger's model column.
+ *
+ * `hasUserKey` must be the ACTUAL presence of a saved key, not the provider
+ * setting: "my own key" selected with no key saved falls back to the server
+ * key and must be charged like OpenRouter Free.
+ */
+export const chatCharge = (
+  provider: string | undefined,
+  model: string,
+  hasUserKey = false
+): { amount: number; label: string } => {
+  if (provider === 'openrouter-byok' && hasUserKey) return { amount: 0, label: model };
+  const serverKeyed = provider === 'openrouter-free' || provider === 'openrouter-byok';
+  return {
+    amount: getCreditCost('chat', model),
+    label: serverKeyed ? `openrouter_free:${model}` : model,
+  };
+};
+
+
 // Guest credits (for unauthenticated users)
 export const GUEST_CREDITS = 10;

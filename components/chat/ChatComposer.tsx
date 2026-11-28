@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { Cpu, Database, FileText, Globe, Lock, Mic, Plus, Send, Square, X } from 'lucide-react';
 import * as Tooltip from '@radix-ui/react-tooltip';
-import { AppSettings, BRAND_STUDIO_MODEL_ID, FileAttachment, getModelInfo } from '../../types';
+import { AppSettings, BRAND_STUDIO_MODEL_ID, DEFAULT_CHAT_PROVIDER, FileAttachment, getModelInfo } from '../../types';
 import { Button } from '../UI';
 import { CreditAwareButton } from '../CreditAwareButton';
+import { getOpenRouterKey } from '../../services/openrouterKey';
 import { ChatQuickToolsMenu } from './ChatQuickToolsMenu';
 import { CameraCaptureModal } from './CameraCaptureModal';
 
@@ -76,12 +77,22 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
   onVoiceInput,
 }) => {
   const brandChatModelId = settings.brandModel || BRAND_STUDIO_MODEL_ID;
-  const modelToCharge = chatMode === 'brand' ? brandChatModelId : settings.model;
+  const provider = chatMode === 'brand' ? 'chutes' : (settings.provider ?? DEFAULT_CHAT_PROVIDER);
+  // A BYO OpenRouter key is the user's own account — it never needs app credits.
+  // "BYO" requires a saved key: otherwise the send uses the server key.
+  const byoActive = provider === 'openrouter-byok' && Boolean(getOpenRouterKey());
+  const chargesCredits = !byoActive;
+  const modelToCharge = chatMode === 'brand'
+    ? brandChatModelId
+    : provider === 'chutes'
+      ? settings.model
+      : (settings.openrouterModel || 'openrouter_free');
   const canUseCamera =
     typeof navigator !== 'undefined' &&
     !!navigator.mediaDevices?.getUserMedia &&
     !!getModelInfo(modelToCharge)?.supportsVision;
   const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [showSignInHint, setShowSignInHint] = useState(false);
 
   return (
     <div className="p-2 sm:p-4 bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl border-t border-white/50 dark:border-white/5 z-20">
@@ -119,6 +130,15 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
             <button onClick={onClearAttachment} className="p-1 hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-400 hover:text-red-500 rounded-full transition-colors">
               <X className="w-4 h-4" />
             </button>
+          </div>
+        )}
+
+        {!isAuthenticated && showSignInHint && (
+          <div role="status" className="flex items-center justify-between gap-3 px-3 py-2 rounded-2xl border border-primary/30 bg-primary/5">
+            <span className="text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-200">
+              Sign in to start chatting — it's free
+            </span>
+            <Button size="sm" onClick={onRequestAuth}>Sign In</Button>
           </div>
         )}
 
@@ -296,13 +316,13 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 if (isAuthenticated) {
-                  if (canAfford('chat', modelToCharge)) {
+                  if (!chargesCredits || canAfford('chat', modelToCharge)) {
                     onSend(inputValue);
                   } else {
-                    alert('Insufficient credits. Please add more credits to continue.');
+                    alert('Insufficient credits. Add more credits to continue — or add your own OpenRouter key in Settings to chat free.');
                   }
                 } else {
-                  onRequestAuth();
+                  setShowSignInHint(true);
                 }
               }
             }}
@@ -363,8 +383,9 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
             <CreditAwareButton
               action="chat"
               model={modelToCharge}
+              free={!chargesCredits}
               onClick={() => onSend(inputValue)}
-              onRequestAuth={onRequestAuth}
+              onRequestAuth={() => setShowSignInHint(true)}
               disabled={isLoading || (!inputValue.trim() && !attachment)}
               size="icon"
               className="rounded-full h-8 w-8 sm:h-9 sm:w-9 shadow-md shadow-primary/20"

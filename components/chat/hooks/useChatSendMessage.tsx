@@ -1,9 +1,11 @@
 import { useCallback } from 'react';
-import { AppSettings, BRAND_STUDIO_MODEL_ID, DEFAULT_SYSTEM_PROMPT, Message, ContentPart, MediaItem, NORMAL_CHAT_APP_FEATURES_CONTEXT, BASE_SYSTEM_CONTEXT, RESPONSE_FORMAT_CONTEXT } from '../../../types';
+import { AppSettings, BRAND_STUDIO_MODEL_ID, DEFAULT_CHAT_PROVIDER, DEFAULT_SYSTEM_PROMPT, Message, ContentPart, MediaItem, NORMAL_CHAT_APP_FEATURES_CONTEXT, BASE_SYSTEM_CONTEXT, RESPONSE_FORMAT_CONTEXT } from '../../../types';
 import { createBrandStudioToolRuntime } from '../../../services/brandStudioToolRuntime';
 import { KnowledgeBaseService } from '../../../services/knowledgeBase';
-import { getCreditCost } from '../../../services/creditCosts';
+import { chatCharge } from '../../../services/creditCosts';
 import { ChutesService } from '../../../services/chutes';
+import { getAppOpenRouterService, resolveOpenRouterModel, describeOpenRouterError } from '../../../services/openrouter';
+import { getOpenRouterKey } from '../../../services/openrouterKey';
 import { SupabaseService } from '../../../services/supabase';
 import { FileAttachment } from '../../../types';
 
@@ -80,18 +82,36 @@ export const useChatSendMessage = ({
     setIsQuickToolsOpen(false);
 
     const brandChatModelId = settings.brandModel || BRAND_STUDIO_MODEL_ID;
-    const activeModel = chatMode === 'brand' ? brandChatModelId : settings.model;
-    const cost = getCreditCost('chat', activeModel);
+    // Brand studio tooling is Chutes-only; chat picks the configured provider.
+    const provider = chatMode === 'brand' ? 'chutes' : (settings.provider ?? DEFAULT_CHAT_PROVIDER);
 
-    if (isAuthenticated && userId) {
+    let activeModel: string;
+    if (provider === 'chutes') {
+      activeModel = chatMode === 'brand' ? brandChatModelId : settings.model;
+    } else {
       try {
-        await supabaseService.useCredits(userId, cost, 'chat', activeModel, sessionId);
-        refetchCredits();
-      } catch (error: unknown) {
-        alert('Insufficient credits. Please add more credits to continue.');
+        activeModel = await resolveOpenRouterModel(settings);
+      } catch {
+        setMessages(prev => [...prev, { role: 'system', content: 'Error: no OpenRouter models available right now — try again in a moment.' }]);
         return;
       }
-    } else {
+    }
+    // Chutes and OpenRouter Free both run on GashoTech's keys and bill the
+    // normal chat cost; a BYO OpenRouter key bills nothing (F3). "BYO" means a
+    // key is actually saved — otherwise the request uses the server key.
+    const byoActive = provider === 'openrouter-byok' && Boolean(getOpenRouterKey());
+    const { amount: cost, label: creditLabel } = chatCharge(provider, activeModel, byoActive);
+    const charging = cost > 0;
+
+    if (charging && isAuthenticated && userId) {
+      try {
+        await supabaseService.useCredits(userId, cost, 'chat', creditLabel, sessionId);
+        refetchCredits();
+      } catch (error: unknown) {
+        alert('Insufficient credits. Add more credits to continue — or add your own OpenRouter key in Settings to chat free.');
+        return;
+      }
+    } else if (charging) {
       const guestCredits = parseInt(localStorage.getItem('chutes_guest_credits') || '10');
       if (guestCredits < cost) {
         alert('You\'ve used your free guest credits. Sign in to get 10 free credits and continue using the assistant.');
@@ -227,7 +247,8 @@ export const useChatSendMessage = ({
         })
         : null;
 
-      const stream = chutesService.streamChat(
+      const chatService = provider === 'chutes' ? chutesService : getAppOpenRouterService(settings);
+      const stream = chatService.streamChat(
         [...currentHistory, userMsg],
         finalSystemPrompt,
         activeModel,
@@ -307,17 +328,26 @@ export const useChatSendMessage = ({
           return msg;
         }));
       } else {
-        const errorMsg: Message = { role: 'system', content: `Error: ${(error as Error).message}` };
+        const rawError = provider === 'chutes'
+          ? (error as Error).message
+          : describeOpenRouterError(error, byoActive);
+        // Any 401/403 from /api/* in the chat path is a session problem: the
+        // raw text never reaches the user (F4).
+        const errorText = /LLM Error: 40[13]/.test(rawError) ? 'Sign in to start chatting — it\'s free' : rawError;
+        const errorMsg: Message = {
+          role: 'system',
+          content: `Error: ${errorText}`,
+        };
         setMessages(prev => [...prev, errorMsg]);
         // Refund credits on error (not on user abort)
-        if (isAuthenticated && userId) {
+        if (charging && isAuthenticated && userId) {
           try {
             await supabaseService.addCredits(userId, cost, 'refund');
             refetchCredits();
           } catch {
             void 0;
           }
-        } else {
+        } else if (charging) {
           const guestCredits = parseInt(localStorage.getItem('chutes_guest_credits') || '10');
           localStorage.setItem('chutes_guest_credits', String(guestCredits + cost));
         }

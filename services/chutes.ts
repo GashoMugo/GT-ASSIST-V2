@@ -52,7 +52,7 @@ export class ChutesService {
    * 429/503 retries (documented in database/migrations/model_call_log.sql).
    * Logging is fire-and-forget and can never break the actual call.
    */
-  private async loggedCall(call: ModelCallInfo, exec: () => Promise<Response>): Promise<Response> {
+  protected async loggedCall(call: ModelCallInfo, exec: () => Promise<Response>): Promise<Response> {
     const started = Date.now();
     try {
       const response = await exec();
@@ -74,7 +74,7 @@ export class ChutesService {
     }
   }
 
-  private async proxyFetch(targetUrl: string, body: unknown, call: ModelCallInfo, signal?: AbortSignal): Promise<Response> {
+  protected async proxyFetch(targetUrl: string, body: unknown, call: ModelCallInfo, signal?: AbortSignal): Promise<Response> {
     const headers = { 'Content-Type': 'application/json', ...(await authHeaders()) };
     return this.loggedCall(call, () =>
       this.fetchWithRetry(PROXY_URL, {
@@ -103,7 +103,7 @@ export class ChutesService {
   }
 
   // Helper for exponential backoff retry logic
-  private async fetchWithRetry(url: string, options: RequestInit, retries = 3, initialDelay = 1000): Promise<Response> {
+  protected async fetchWithRetry(url: string, options: RequestInit, retries = 3, initialDelay = 1000): Promise<Response> {
     try {
       const response = await fetch(url, options);
 

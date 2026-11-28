@@ -59,6 +59,15 @@ export interface FileAttachment {
   mimeType: string;
 }
 
+/** Chat provider dimension: Chutes, OpenRouter free, OpenRouter BYO key. */
+export type ChatProvider = 'chutes' | 'openrouter-free' | 'openrouter-byok';
+
+/**
+ * Owner decision 2026-11-27: OpenRouter Free is the default for every user,
+ * including one with no saved choice. Chutes stays selectable.
+ */
+export const DEFAULT_CHAT_PROVIDER: ChatProvider = 'openrouter-free';
+
 export interface AppSettings {
   apiKey: string;
   model: string;
@@ -73,6 +82,8 @@ export interface AppSettings {
   braveApiKey?: string;
   searchProvider: 'tavily' | 'brave';
   welcomeView?: 'chat' | 'media';
+  provider?: ChatProvider;
+  openrouterModel?: string;
 }
 
 export const BASE_SYSTEM_CONTEXT = `You are a helpful, direct, and truthful assistant.
