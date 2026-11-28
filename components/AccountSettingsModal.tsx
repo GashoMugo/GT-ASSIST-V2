@@ -321,6 +321,7 @@ export const AccountSettingsModal: React.FC<AccountSettingsModalProps> = ({ isOp
                             </div>
 
                             <div className="space-y-6 pt-4">
+                                {providerValue === 'chutes' && (
                                 <div className="space-y-2">
                                     <Label>Preferred Model</Label>
                                     <Select
@@ -343,6 +344,7 @@ export const AccountSettingsModal: React.FC<AccountSettingsModalProps> = ({ isOp
                                         />
                                     )}
                                 </div>
+                                )}
 
                                 <div className="space-y-2">
                                     <Label>AI Provider</Label>
