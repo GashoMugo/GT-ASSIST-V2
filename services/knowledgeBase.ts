@@ -7,6 +7,7 @@ import { AppSettings } from '../types';
 import { validateEmbeddingResponse, validateKnowledgeResults, formatErrors } from './toolOutputValidation';
 import { getCachedKnowledge, setCachedKnowledge } from './queryCache';
 import { logModelCall } from './modelCallLog';
+import { authHeaders } from './authToken';
 
 // =============================================================================
 // Types
@@ -280,6 +281,7 @@ export class KnowledgeBaseService {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    ...(await authHeaders()),
                 },
                 body: JSON.stringify({
                     targetUrl: EMBEDDING_URL,

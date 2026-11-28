@@ -3,6 +3,7 @@ import { Message, TTSRequest, STTRequest, ImageGenRequest, VideoGenRequest, Imag
 import { SearchAgent } from './searchAgent';
 import { isLtx25Model, buildLtx25GenerationInput } from './chutesLtx25';
 import { fetchWithRetry } from './retryFetch';
+import { authHeaders } from './authToken';
 import { logModelCall, type ModelCallMode } from './modelCallLog';
 import { getCachedChat, setCachedChat } from './queryCache';
 import { getAppUserContext } from './userContext';
@@ -73,11 +74,12 @@ export class ChutesService {
     }
   }
 
-  private proxyFetch(targetUrl: string, body: unknown, call: ModelCallInfo, signal?: AbortSignal): Promise<Response> {
+  private async proxyFetch(targetUrl: string, body: unknown, call: ModelCallInfo, signal?: AbortSignal): Promise<Response> {
+    const headers = { 'Content-Type': 'application/json', ...(await authHeaders()) };
     return this.loggedCall(call, () =>
       this.fetchWithRetry(PROXY_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ targetUrl, body, userKey: this.userKey }),
         signal,
       })
@@ -827,12 +829,12 @@ export class ChutesService {
 
     const response = await this.loggedCall(
       { mode: 'video', model: request.modelId || modelFromUrl(request.modelUrl), prompt: request.prompt },
-      () =>
+      async () =>
         fetchWithRetry(
           PROXY_URL,
           {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
             body: JSON.stringify({ targetUrl: request.modelUrl, body, userKey: this.userKey }),
           },
           { signal, onRetry }
