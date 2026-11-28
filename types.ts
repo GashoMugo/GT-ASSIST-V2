@@ -59,6 +59,9 @@ export interface FileAttachment {
   mimeType: string;
 }
 
+/** Chat provider dimension: Chutes (default), OpenRouter free, OpenRouter BYO key. */
+export type ChatProvider = 'chutes' | 'openrouter-free' | 'openrouter-byok';
+
 export interface AppSettings {
   apiKey: string;
   model: string;
@@ -73,6 +76,8 @@ export interface AppSettings {
   braveApiKey?: string;
   searchProvider: 'tavily' | 'brave';
   welcomeView?: 'chat' | 'media';
+  provider?: ChatProvider;
+  openrouterModel?: string;
 }
 
 export const BASE_SYSTEM_CONTEXT = `You are a helpful, direct, and truthful assistant.

@@ -4,6 +4,7 @@ import { createBrandStudioToolRuntime } from '../../../services/brandStudioToolR
 import { KnowledgeBaseService } from '../../../services/knowledgeBase';
 import { getCreditCost } from '../../../services/creditCosts';
 import { ChutesService } from '../../../services/chutes';
+import { getAppOpenRouterService, resolveOpenRouterModel, describeOpenRouterError } from '../../../services/openrouter';
 import { SupabaseService } from '../../../services/supabase';
 import { FileAttachment } from '../../../types';
 
@@ -80,10 +81,24 @@ export const useChatSendMessage = ({
     setIsQuickToolsOpen(false);
 
     const brandChatModelId = settings.brandModel || BRAND_STUDIO_MODEL_ID;
-    const activeModel = chatMode === 'brand' ? brandChatModelId : settings.model;
+    // Brand studio tooling is Chutes-only; chat picks the configured provider.
+    const provider = chatMode === 'brand' ? 'chutes' : (settings.provider ?? 'chutes');
+
+    let activeModel: string;
+    if (provider === 'chutes') {
+      activeModel = chatMode === 'brand' ? brandChatModelId : settings.model;
+    } else {
+      try {
+        activeModel = await resolveOpenRouterModel(settings);
+      } catch {
+        setMessages(prev => [...prev, { role: 'system', content: 'Error: no OpenRouter models available — check the provider and key in Settings.' }]);
+        return;
+      }
+    }
     const cost = getCreditCost('chat', activeModel);
 
-    if (isAuthenticated && userId) {
+    // OpenRouter runs on the free pool or the user's own account — no app credits.
+    if (provider === 'chutes' && isAuthenticated && userId) {
       try {
         await supabaseService.useCredits(userId, cost, 'chat', activeModel, sessionId);
         refetchCredits();
@@ -91,7 +106,7 @@ export const useChatSendMessage = ({
         alert('Insufficient credits. Please add more credits to continue.');
         return;
       }
-    } else {
+    } else if (provider === 'chutes') {
       const guestCredits = parseInt(localStorage.getItem('chutes_guest_credits') || '10');
       if (guestCredits < cost) {
         alert('You\'ve used your free guest credits. Sign in to get 10 free credits and continue using the assistant.');
@@ -227,7 +242,8 @@ export const useChatSendMessage = ({
         })
         : null;
 
-      const stream = chutesService.streamChat(
+      const chatService = provider === 'chutes' ? chutesService : getAppOpenRouterService(settings);
+      const stream = chatService.streamChat(
         [...currentHistory, userMsg],
         finalSystemPrompt,
         activeModel,
@@ -307,17 +323,20 @@ export const useChatSendMessage = ({
           return msg;
         }));
       } else {
-        const errorMsg: Message = { role: 'system', content: `Error: ${(error as Error).message}` };
+        const errorMsg: Message = {
+          role: 'system',
+          content: `Error: ${provider === 'chutes' ? (error as Error).message : describeOpenRouterError(error)}`,
+        };
         setMessages(prev => [...prev, errorMsg]);
         // Refund credits on error (not on user abort)
-        if (isAuthenticated && userId) {
+        if (provider === 'chutes' && isAuthenticated && userId) {
           try {
             await supabaseService.addCredits(userId, cost, 'refund');
             refetchCredits();
           } catch {
             void 0;
           }
-        } else {
+        } else if (provider === 'chutes') {
           const guestCredits = parseInt(localStorage.getItem('chutes_guest_credits') || '10');
           localStorage.setItem('chutes_guest_credits', String(guestCredits + cost));
         }

@@ -455,11 +455,16 @@ const App: React.FC = () => {
     { id: 'pricing' as const, label: 'Pricing', icon: CreditCard },
   ];
 
+  const headerProvider = headerChatMode === 'brand' ? 'chutes' : (settings.provider ?? 'chutes');
   const headerActiveModelId = headerChatMode === 'brand'
     ? (settings.brandModel || BRAND_STUDIO_MODEL_ID)
-    : settings.model;
-  const headerActiveModelShortName = getModelShortName(headerActiveModelId);
-  const headerActiveModelSupportsVision = Boolean(getModelInfo(headerActiveModelId)?.supportsVision);
+    : headerProvider === 'chutes'
+      ? settings.model
+      : (settings.openrouterModel || 'OpenRouter');
+  const headerActiveModelShortName = headerProvider === 'chutes'
+    ? getModelShortName(headerActiveModelId)
+    : (settings.openrouterModel ? getModelShortName(settings.openrouterModel) : 'OpenRouter');
+  const headerActiveModelSupportsVision = headerProvider === 'chutes' && Boolean(getModelInfo(headerActiveModelId)?.supportsVision);
 
   return (
     <ServicesProvider services={services}>

@@ -71,9 +71,16 @@ free daily allowance plus paid packs and subscriptions via Paystack in KES. A pu
 in the ledger only after Paystack confirms it server-side (webhook) — spending always has a
 human confirming the checkout.
 
+**Chat providers** — chat text runs on Chutes by default. Settings → AI Configuration can switch
+it to OpenRouter: *Free models* (server-side `OPENROUTER_API_KEY`, live-restricted to free text
+models on OpenRouter's shared daily limit) or *my own key* (kept in this browser's localStorage
+only, sent per request as `X-OpenRouter-Key`, never logged or stored server-side; any text model).
+Media, TTS and STT stay on Chutes. With no server key set, free mode answers 503 and the UI asks
+for your own key; OpenRouter's 429 shows the daily-limit hint.
+
 **Security model:**
 
-- Provider keys live only in server-side env (`CHUTES_API_KEY`); nothing secret ships in the
+- Provider keys live only in server-side env (`CHUTES_API_KEY`, `OPENROUTER_API_KEY`); nothing secret ships in the
   client bundle.
 - `npm run build` finishes with `scripts/scan-dist-secrets.mjs`, which fails the build if any
   key shape reaches `dist/` — a reintroduced client secret cannot ship silently.

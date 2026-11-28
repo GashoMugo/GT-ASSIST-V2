@@ -1,6 +1,8 @@
 import React from 'react';
 import { X } from 'lucide-react';
 import { AppSettings, AVAILABLE_MODELS, BRAND_STUDIO_MODEL_ID, BRAND_VISION_MODEL_IDS, getModelShortName } from '../types';
+import { fetchOpenRouterModels, type OpenRouterModel } from '../services/openrouter';
+import { getOpenRouterKey } from '../services/openrouterKey';
 
 type ChatMode = 'chat' | 'brand';
 
@@ -32,6 +34,20 @@ export const LogoModelPicker: React.FC<LogoModelPickerProps> = ({
   const isMobile = typeof window !== 'undefined'
     && window.matchMedia('(max-width: 639px)').matches;
 
+  const provider = chatMode === 'brand' ? 'chutes' : (settings.provider ?? 'chutes');
+  const [orModels, setOrModels] = React.useState<OpenRouterModel[] | null>(null);
+  const [orError, setOrError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!isOpen || provider === 'chutes') return;
+    let cancelled = false;
+    setOrError(null);
+    fetchOpenRouterModels(provider === 'openrouter-byok' ? getOpenRouterKey() : '')
+      .then((models) => { if (!cancelled) setOrModels(models); })
+      .catch((err: Error) => { if (!cancelled) setOrError(err.message); });
+    return () => { cancelled = true; };
+  }, [isOpen, provider]);
+
   React.useEffect(() => {
     if (!isOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -57,22 +73,43 @@ export const LogoModelPicker: React.FC<LogoModelPickerProps> = ({
 
   if (!isOpen) return null;
 
+  const usesOpenRouter = provider !== 'chutes';
   const brandModelId = settings.brandModel || BRAND_STUDIO_MODEL_ID;
-  const activeModelId = chatMode === 'brand' ? brandModelId : settings.model;
-  const activeShortName = getModelShortName(activeModelId);
+  const activeModelId = chatMode === 'brand'
+    ? brandModelId
+    : usesOpenRouter
+      ? (settings.openrouterModel || '')
+      : settings.model;
 
   const brandModels = BRAND_VISION_MODEL_IDS.map((id) => AVAILABLE_MODELS.find((m) => m.id === id)).filter(Boolean) as Array<
     (typeof AVAILABLE_MODELS)[number]
   >;
 
-  const listModels = chatMode === 'brand' ? brandModels : AVAILABLE_MODELS;
+  type PickerModel = { id: string; shortName: string; badge?: string };
+  const priceLabel = (m: OpenRouterModel): string => {
+    const perMillion = Number(m.promptPrice) * 1_000_000;
+    return Number.isFinite(perMillion) && perMillion > 0 ? `$${Number(perMillion.toFixed(2))}/M` : 'Paid';
+  };
+  const listModels: PickerModel[] = chatMode === 'brand'
+    ? brandModels
+    : usesOpenRouter
+      ? (orModels ?? []).map((m) => ({ id: m.id, shortName: m.name || m.id, badge: m.free ? 'Free' : priceLabel(m) }))
+      : AVAILABLE_MODELS;
+
+  const activeShortName = usesOpenRouter
+    ? (listModels.find((m) => m.id === activeModelId)?.shortName || activeModelId)
+    : getModelShortName(activeModelId);
+  const headerSubtitle = usesOpenRouter && listModels.length === 0
+    ? (orError || 'Loading models…')
+    : (activeShortName || activeModelId || 'Select a model');
+
   const onSelectModel = (modelId: string) => {
     if (chatMode === 'brand') {
       onUpdateSettings({ brandModel: modelId });
       onClose();
       return;
     }
-    onUpdateSettings({ model: modelId });
+    onUpdateSettings(usesOpenRouter ? { openrouterModel: modelId } : { model: modelId });
     onClose();
   };
 
@@ -99,7 +136,7 @@ export const LogoModelPicker: React.FC<LogoModelPickerProps> = ({
             <div className="min-w-0">
               <div className="text-xs font-black text-slate-900 dark:text-white tracking-tight">Model</div>
               <div className="text-[11px] text-slate-500 dark:text-slate-300 truncate">
-                Active: <span className="font-semibold text-primary">{activeShortName || activeModelId}</span>
+                Active: <span className="font-semibold text-primary">{headerSubtitle}</span>
               </div>
             </div>
             <button
@@ -191,7 +228,7 @@ export const LogoModelPicker: React.FC<LogoModelPickerProps> = ({
             <div className="min-w-0">
               <div className="text-xs font-black text-slate-900 dark:text-white tracking-tight">Model</div>
               <div className="text-[11px] text-slate-500 dark:text-slate-300 truncate">
-                Active: <span className="font-semibold text-primary">{activeShortName || activeModelId}</span>
+                Active: <span className="font-semibold text-primary">{headerSubtitle}</span>
               </div>
             </div>
             <button
@@ -277,7 +314,7 @@ export const LogoModelPicker: React.FC<LogoModelPickerProps> = ({
           <div className="min-w-0">
             <div className="text-xs font-black text-slate-900 dark:text-white tracking-tight">Select model</div>
             <div className="text-[11px] text-slate-500 dark:text-slate-300 truncate">
-              Active: <span className="font-semibold text-primary">{activeShortName || activeModelId}</span>
+              Active: <span className="font-semibold text-primary">{headerSubtitle}</span>
             </div>
           </div>
           <button
