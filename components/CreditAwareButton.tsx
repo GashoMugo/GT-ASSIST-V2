@@ -14,6 +14,8 @@ interface CreditAwareButtonProps {
   size?: 'sm' | 'md' | 'lg' | 'icon';
   variant?: 'primary' | 'secondary' | 'ghost' | 'destructive' | 'glass';
   onRequestAuth?: () => void;
+  /** Provider runs on the user's own key — never gated on app credits. */
+  free?: boolean;
 }
 
 export function CreditAwareButton({
@@ -25,7 +27,8 @@ export function CreditAwareButton({
   disabled = false,
   size = 'md',
   variant = 'primary',
-  onRequestAuth
+  onRequestAuth,
+  free = false
 }: CreditAwareButtonProps) {
   const { userId } = useAuthContext();
   const { credits, subscriptionTier, loading, canAfford } = useCredits();
@@ -58,7 +61,7 @@ export function CreditAwareButton({
     );
   }
 
-  const canUse = canAfford(action, model);
+  const canUse = free || canAfford(action, model);
 
   if (!canUse) {
     return (

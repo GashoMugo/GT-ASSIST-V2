@@ -391,7 +391,7 @@ export const AccountSettingsModal: React.FC<AccountSettingsModalProps> = ({ isOp
                                                 <Button type="button" size="sm" variant="secondary" onClick={handleTestOpenRouterKey} disabled={!orKey.trim() || orKeyBusy}>
                                                     {orKeyBusy ? 'Testing…' : 'Test'}
                                                 </Button>
-                                                <Button type="button" size="sm" variant="destructive" onClick={() => { setOrKey(''); clearOpenRouterKey(); setOrKeyStatus(null); }} disabled={!orKey}>
+                                                <Button type="button" size="sm" variant="destructive" onClick={() => { setOrKey(''); clearOpenRouterKey(); setOrKeyStatus(null); handleChange('provider', 'openrouter-free'); }} disabled={!orKey}>
                                                     Remove
                                                 </Button>
                                                 {orKey && (
@@ -399,6 +399,11 @@ export const AccountSettingsModal: React.FC<AccountSettingsModalProps> = ({ isOp
                                                 )}
                                             </div>
                                             {orKeyStatus && <p className="text-[10px] font-bold text-primary">{orKeyStatus}</p>}
+                                            {!orKey && (
+                                                <p className="text-[10px] text-amber-600 dark:text-amber-400">
+                                                    No key saved yet — chats still use the shared free pool and cost credits until you add one.
+                                                </p>
+                                            )}
                                         </div>
                                     )}
                                 </div>

@@ -528,6 +528,11 @@ const App: React.FC = () => {
           onChatModeChange={handleChatModeChange}
           settings={settings}
           onUpdateSettings={(patch) => setSettings(prev => ({ ...prev, ...patch }))}
+          isAuthenticated={Boolean(isSignedIn)}
+          onRequestAuth={() => {
+            setAuthMode('signin');
+            setShowAuthModal(true);
+          }}
           anchorRect={modelPickerAnchorRect}
           anchorEl={modelPickerAnchorEl}
         />

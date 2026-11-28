@@ -341,6 +341,45 @@ try {
   assert.equal(keyMod.getOpenRouterKey(), '', 'clear removes');
   console.log('PASS client key: localStorage round-trip, masking, clear');
 
+  // ---- F1: the default (server-key) mode sends NO BYO key header, and a 401
+  // is a sign-in problem — "add your own key" only appears on 429/503.
+  execFileSync(
+    esbuildBin,
+    ['services/openrouter.ts', '--bundle', '--format=esm', '--platform=node',
+      '--outfile=' + join(work, 'openrouterClient.mjs'), '--define:import.meta.env={}'],
+    { cwd: root, stdio: 'pipe' }
+  );
+  const client = await import('file://' + join(work, 'openrouterClient.mjs'));
+  const baseSettings = {
+    apiKey: 'internal', model: 'Qwen/Qwen3-32B-TEE', systemPrompt: '',
+    ttsVoice: '', ttsSpeed: 1, useSupabase: false, searchProvider: 'tavily',
+  };
+  let sent = null;
+  globalThis.fetch = async (url, opts) => {
+    sent = { url: String(url), headers: opts.headers };
+    return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  const noKeyService = client.getAppOpenRouterService({ ...baseSettings, provider: 'openrouter-free' });
+  await noKeyService.proxyFetch('/x', { model: 'a' }, { mode: 'chat', model: 'a', prompt: 'hi' });
+  assert.ok(sent && !('X-OpenRouter-Key' in sent.headers), 'fresh user, OpenRouter Free: NO X-OpenRouter-Key header');
+  globalThis.localStorage.removeItem('openrouter_api_key');
+  const defaultService = client.getAppOpenRouterService(baseSettings);
+  await defaultService.proxyFetch('/x', { model: 'a' }, { mode: 'chat', model: 'a', prompt: 'hi' });
+  assert.ok(!('X-OpenRouter-Key' in sent.headers), 'default provider with no saved choice: NO key header');
+
+  assert.equal(
+    client.describeOpenRouterError(new Error('LLM Error: 401')),
+    "Sign in to start chatting — it's free",
+    '401 in server mode is a sign-in prompt, never "add your key"'
+  );
+  assert.match(client.describeOpenRouterError(new Error('LLM Error: 429')), /add your own OpenRouter key/, '429 suggests a BYO key');
+  assert.match(client.describeOpenRouterError(new Error('LLM Error: 503')), /not configured/, 'real 503 says not configured');
+  assert.ok(
+    !/add your own OpenRouter key|add the key/i.test(client.describeOpenRouterError(new Error('LLM Error: 401'), true).replace('check your OpenRouter key', '')),
+    'BYO 401 is a key rejection, not a request to add one'
+  );
+  console.log('PASS F1: server mode sends no key header; add-your-key only on 429/503; 401 -> sign in');
+
   console.log('ALL OpenRouter smoke tests passed');
 } finally {
   rmSync(work, { recursive: true, force: true });

@@ -45,6 +45,7 @@ export const fetchOpenRouterModels = async (userKey = ''): Promise<OpenRouterMod
 
   const res = await fetch(`${PROXY_URL}?action=models`, { headers });
   if (!res.ok) {
+    if (res.status === 401 || res.status === 403) throw new Error('Sign in to see models');
     throw new Error(res.status === 503 ? 'OpenRouter free mode not configured' : `Model list unavailable (HTTP ${res.status})`);
   }
   const data = (await res.json()) as { models?: OpenRouterModel[] };
@@ -68,12 +69,18 @@ export const testOpenRouterKey = async (key: string): Promise<{ valid: boolean; 
   return { valid: true, message: `Valid${remaining}` };
 };
 
-/** Turn raw proxy errors into the exact user-facing hints in the spec. */
-export const describeOpenRouterError = (error: unknown): string => {
+/**
+ * Turn raw proxy errors into the exact user-facing hints in the spec.
+ * "Add your own key" appears ONLY on a real 429 daily limit or a server-answered
+ * 503; a 401 is a session problem, never a missing personal key (F1/F4).
+ */
+export const describeOpenRouterError = (error: unknown, hasUserKey = false): string => {
   const raw = error instanceof Error ? error.message : String(error);
   const status = /LLM Error: (\d{3})/.exec(raw)?.[1];
   if (status === '429') return 'Free daily limit reached — add your own OpenRouter key in Settings or try later';
-  if (status === '401' || status === '403') return 'Key rejected — check your OpenRouter key in Settings';
+  if (status === '401' || status === '403') {
+    return hasUserKey ? 'Key rejected — check your OpenRouter key in Settings' : 'Sign in to start chatting — it\'s free';
+  }
   if (status === '503') return 'OpenRouter free mode is not configured yet — add your own OpenRouter key in Settings or try later';
   return raw;
 };

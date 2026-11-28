@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "scan:secrets": "node scripts/scan-dist-secrets.mjs",
     "test:api": "node scripts/api_smoke.mjs && node scripts/openrouter_smoke.mjs",
-    "test:tier1": "node scripts/model_call_log_smoke.mjs && node scripts/tool_validation_smoke.mjs && node scripts/query_cache_smoke.mjs"
+    "test:tier1": "node scripts/credit_policy_smoke.mjs && node scripts/model_call_log_smoke.mjs && node scripts/tool_validation_smoke.mjs && node scripts/query_cache_smoke.mjs",
+    "test:credits": "node scripts/credit_policy_smoke.mjs"
   },
   "dependencies": {
     "@clerk/backend": "^3.33.1",
