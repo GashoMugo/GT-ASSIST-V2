@@ -24,6 +24,8 @@ export type OpenRouterModel = {
   id: string;
   name: string;
   free: boolean;
+  /** Free cloaked model: may log prompts for training (shown in the picker). */
+  stealth: boolean;
   promptPrice: string;
   completionPrice: string;
 };

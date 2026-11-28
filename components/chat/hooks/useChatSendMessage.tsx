@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { AppSettings, BRAND_STUDIO_MODEL_ID, DEFAULT_SYSTEM_PROMPT, Message, ContentPart, MediaItem, NORMAL_CHAT_APP_FEATURES_CONTEXT, BASE_SYSTEM_CONTEXT, RESPONSE_FORMAT_CONTEXT } from '../../../types';
+import { AppSettings, BRAND_STUDIO_MODEL_ID, DEFAULT_CHAT_PROVIDER, DEFAULT_SYSTEM_PROMPT, Message, ContentPart, MediaItem, NORMAL_CHAT_APP_FEATURES_CONTEXT, BASE_SYSTEM_CONTEXT, RESPONSE_FORMAT_CONTEXT } from '../../../types';
 import { createBrandStudioToolRuntime } from '../../../services/brandStudioToolRuntime';
 import { KnowledgeBaseService } from '../../../services/knowledgeBase';
 import { getCreditCost } from '../../../services/creditCosts';
@@ -82,7 +82,7 @@ export const useChatSendMessage = ({
 
     const brandChatModelId = settings.brandModel || BRAND_STUDIO_MODEL_ID;
     // Brand studio tooling is Chutes-only; chat picks the configured provider.
-    const provider = chatMode === 'brand' ? 'chutes' : (settings.provider ?? 'chutes');
+    const provider = chatMode === 'brand' ? 'chutes' : (settings.provider ?? DEFAULT_CHAT_PROVIDER);
 
     let activeModel: string;
     if (provider === 'chutes') {

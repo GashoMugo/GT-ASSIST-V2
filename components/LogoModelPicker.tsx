@@ -1,6 +1,6 @@
 import React from 'react';
 import { X } from 'lucide-react';
-import { AppSettings, AVAILABLE_MODELS, BRAND_STUDIO_MODEL_ID, BRAND_VISION_MODEL_IDS, getModelShortName } from '../types';
+import { AppSettings, AVAILABLE_MODELS, BRAND_STUDIO_MODEL_ID, BRAND_VISION_MODEL_IDS, DEFAULT_CHAT_PROVIDER, getModelShortName } from '../types';
 import { fetchOpenRouterModels, type OpenRouterModel } from '../services/openrouter';
 import { getOpenRouterKey } from '../services/openrouterKey';
 
@@ -34,7 +34,7 @@ export const LogoModelPicker: React.FC<LogoModelPickerProps> = ({
   const isMobile = typeof window !== 'undefined'
     && window.matchMedia('(max-width: 639px)').matches;
 
-  const provider = chatMode === 'brand' ? 'chutes' : (settings.provider ?? 'chutes');
+  const provider = chatMode === 'brand' ? 'chutes' : (settings.provider ?? DEFAULT_CHAT_PROVIDER);
   const [orModels, setOrModels] = React.useState<OpenRouterModel[] | null>(null);
   const [orError, setOrError] = React.useState<string | null>(null);
 
@@ -86,14 +86,12 @@ export const LogoModelPicker: React.FC<LogoModelPickerProps> = ({
   >;
 
   type PickerModel = { id: string; shortName: string; badge?: string };
-  const priceLabel = (m: OpenRouterModel): string => {
-    const perMillion = Number(m.promptPrice) * 1_000_000;
-    return Number.isFinite(perMillion) && perMillion > 0 ? `$${Number(perMillion.toFixed(2))}/M` : 'Paid';
-  };
+  // Both modes get the server's allowlist, so every row is Free or Stealth.
+  const hasStealth = usesOpenRouter && (orModels ?? []).some((m) => m.stealth);
   const listModels: PickerModel[] = chatMode === 'brand'
     ? brandModels
     : usesOpenRouter
-      ? (orModels ?? []).map((m) => ({ id: m.id, shortName: m.name || m.id, badge: m.free ? 'Free' : priceLabel(m) }))
+      ? (orModels ?? []).map((m) => ({ id: m.id, shortName: m.name || m.id, badge: m.stealth ? 'Stealth' : 'Free' }))
       : AVAILABLE_MODELS;
 
   const activeShortName = usesOpenRouter
@@ -138,6 +136,11 @@ export const LogoModelPicker: React.FC<LogoModelPickerProps> = ({
               <div className="text-[11px] text-slate-500 dark:text-slate-300 truncate">
                 Active: <span className="font-semibold text-primary">{headerSubtitle}</span>
               </div>
+              {hasStealth && (
+                <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                  Stealth = free, may log prompts for training.
+                </div>
+              )}
             </div>
             <button
               type="button"
@@ -230,6 +233,11 @@ export const LogoModelPicker: React.FC<LogoModelPickerProps> = ({
               <div className="text-[11px] text-slate-500 dark:text-slate-300 truncate">
                 Active: <span className="font-semibold text-primary">{headerSubtitle}</span>
               </div>
+              {hasStealth && (
+                <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                  Stealth = free, may log prompts for training.
+                </div>
+              )}
             </div>
             <button
               type="button"

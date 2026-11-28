@@ -7,7 +7,7 @@ import { Button } from './components/UI';
 import { LogoModelPicker } from './components/LogoModelPicker';
 import { AppHeader } from './components/AppHeader';
 import { AppRoutes } from './components/AppRoutes';
-import { AppSettings, BRAND_STUDIO_MODEL_ID, DEFAULT_SYSTEM_PROMPT, ChatSession, getModelInfo, getModelShortName } from './types';
+import { AppSettings, BRAND_STUDIO_MODEL_ID, DEFAULT_CHAT_PROVIDER, DEFAULT_SYSTEM_PROMPT, ChatSession, getModelInfo, getModelShortName } from './types';
 import { useAuthContext } from './context/AuthContext';
 import { useCredits } from './context/CreditContext';
 import { summarizePrompt } from './utils/stringUtils';
@@ -26,6 +26,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   useSupabase: false,
   searchProvider: 'tavily',
   welcomeView: 'chat',
+  provider: DEFAULT_CHAT_PROVIDER,
 };
 
 const App: React.FC = () => {
@@ -455,7 +456,7 @@ const App: React.FC = () => {
     { id: 'pricing' as const, label: 'Pricing', icon: CreditCard },
   ];
 
-  const headerProvider = headerChatMode === 'brand' ? 'chutes' : (settings.provider ?? 'chutes');
+  const headerProvider = headerChatMode === 'brand' ? 'chutes' : (settings.provider ?? DEFAULT_CHAT_PROVIDER);
   const headerActiveModelId = headerChatMode === 'brand'
     ? (settings.brandModel || BRAND_STUDIO_MODEL_ID)
     : headerProvider === 'chutes'

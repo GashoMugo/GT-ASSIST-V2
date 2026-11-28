@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Modal, Input, Label, Textarea, Button, Select } from './UI';
-import { AppSettings, AVAILABLE_VOICES, AVAILABLE_MODELS, DEFAULT_SYSTEM_PROMPT } from '../types';
+import { AppSettings, AVAILABLE_VOICES, AVAILABLE_MODELS, DEFAULT_CHAT_PROVIDER, DEFAULT_SYSTEM_PROMPT } from '../types';
 import { testOpenRouterKey } from '../services/openrouter';
 import { getOpenRouterKey, setOpenRouterKey, clearOpenRouterKey, maskOpenRouterKey } from '../services/openrouterKey';
 import {
@@ -54,7 +54,7 @@ export const AccountSettingsModal: React.FC<AccountSettingsModalProps> = ({ isOp
         setOrKeyBusy(false);
     };
 
-    const providerValue = formData.provider ?? 'chutes';
+    const providerValue = formData.provider ?? DEFAULT_CHAT_PROVIDER;
 
     const isPro = subscriptionTier === 'pro';
     const isPlus = subscriptionTier === 'plus' || isPro;
@@ -348,9 +348,9 @@ export const AccountSettingsModal: React.FC<AccountSettingsModalProps> = ({ isOp
                                     <Label>AI Provider</Label>
                                     <div className="grid grid-cols-1 gap-2">
                                         {[
-                                            { id: 'chutes' as const, label: 'GashoTech (Chutes)', desc: 'Included with your app credits — default' },
-                                            { id: 'openrouter-free' as const, label: 'OpenRouter — Free models', desc: 'Free text models on a shared daily limit' },
-                                            { id: 'openrouter-byok' as const, label: 'OpenRouter — my own key', desc: 'Any OpenRouter text model, billed to your account' },
+                                            { id: 'chutes' as const, label: 'GashoTech (Chutes)', desc: 'Included with your app credits' },
+                                            { id: 'openrouter-free' as const, label: 'OpenRouter — Free models', desc: 'Free and stealth models on a shared daily limit — default' },
+                                            { id: 'openrouter-byok' as const, label: 'OpenRouter — my own key', desc: 'Same free models, on your own rate limit' },
                                         ].map((option) => (
                                             <button
                                                 key={option.id}

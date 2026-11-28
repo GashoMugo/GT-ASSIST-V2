@@ -71,12 +71,15 @@ free daily allowance plus paid packs and subscriptions via Paystack in KES. A pu
 in the ledger only after Paystack confirms it server-side (webhook) — spending always has a
 human confirming the checkout.
 
-**Chat providers** — chat text runs on Chutes by default. Settings → AI Configuration can switch
-it to OpenRouter: *Free models* (server-side `OPENROUTER_API_KEY`, live-restricted to free text
-models on OpenRouter's shared daily limit) or *my own key* (kept in this browser's localStorage
-only, sent per request as `X-OpenRouter-Key`, never logged or stored server-side; any text model).
-Media, TTS and STT stay on Chutes. With no server key set, free mode answers 503 and the UI asks
-for your own key; OpenRouter's 429 shows the daily-limit hint.
+**Chat providers** — chat text runs on OpenRouter Free by default. Settings → AI Configuration can switch
+it to Chutes (app credits), *OpenRouter — Free models* (server-side `OPENROUTER_API_KEY`, live-restricted
+to free/stealth text models on OpenRouter's shared daily limit) or *OpenRouter — my own key* (kept in this
+browser's localStorage only, sent per request as `X-OpenRouter-Key`, never logged or stored server-side;
+same free/stealth allowlist — your key buys your own rate limit, never a paid model). Every upstream call
+also carries `provider.max_price` = 0 on all cost fields, so OpenRouter refuses to route to anything
+billable. A model that reports a non-zero cost is denylisted in-process. Media, TTS and STT stay on Chutes.
+With no server key set, free mode answers 503 and the UI asks for your own key; OpenRouter's 429 shows the
+daily-limit hint.
 
 **Security model:**
 

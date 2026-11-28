@@ -3,18 +3,23 @@
  *
  * Modes (chat text only — media/TTS/STT stay on the Chutes proxy):
  * - Server-key mode: OPENROUTER_API_KEY from server env, restricted to the
- *   live FREE text-model allowlist fetched from https://openrouter.ai/api/v1/models
- *   and cached in memory for ~1h. A client can never spend this key on a paid
- *   model. No env key -> 503 (never a silent fallback to Chutes).
+ *   live free/stealth text-model allowlist fetched from
+ *   https://openrouter.ai/api/v1/models and cached in memory for 30min (last
+ *   good list survives a failed refresh). No env key -> 503 (never a silent
+ *   fallback to Chutes). No list at all -> 503, never open.
  * - BYO mode: the user's key arrives per request in the `X-OpenRouter-Key`
  *   header, is used for that one upstream call, and is never logged, stored or
  *   echoed (no key in any response body/header, no console output, no model
- *   call log). Any model id is allowed; OpenRouter bills the user's account.
+ *   call log). Same free/stealth allowlist: the BYO key buys the user's own
+ *   rate limit, never a paid model (owner decision 2026-11-27).
+ * - Every upstream call also carries provider.max_price = 0 on all cost fields
+ *   (OpenRouter refuses to route to anything billable) and usage.include; a
+ *   non-zero reported cost denylists the model for the life of the instance.
  *
  * - POST { body: {...chat completion body...} } -> streams the upstream SSE
  *   response straight through.
- * - GET ?action=models -> model list for the picker (free list in server mode,
- *   all text models in BYO mode; Free/pricing flags included).
+ * - GET ?action=models -> allowlisted model list for the picker (Free or
+ *   Stealth flags included) in both modes.
  * - GET ?action=test-key -> validates the BYO key via /api/v1/key and returns
  *   remaining credit. Never echoes the key.
  * - Guards: Clerk session auth + browser-Origin allowlist + per-IP rate
@@ -134,13 +139,26 @@ const requireSession = async (request: Request): Promise<Response | null> => {
 
 const UPSTREAM_CHAT = 'https://openrouter.ai/api/v1/chat/completions';
 
-/** Fields the route relays upstream; anything else (plugins, provider) is dropped. */
+/**
+ * Fields the route relays upstream. Anything else the client sends — `models`
+ * (fallback arrays), `route`, `provider`, `plugins`, `transforms`,
+ * `web_search_options`, `presence_penalty`/`frequency_penalty` — is dropped
+ * before the call: those extras can spend the key on paid routing/features
+ * (AEGIS H-1).
+ */
 const ALLOWED_CHAT_FIELDS = [
   'model', 'messages', 'stream', 'max_tokens', 'temperature', 'top_p', 'stop',
-  'seed', 'presence_penalty', 'frequency_penalty', 'tools', 'tool_choice', 'response_format',
+  'seed', 'tools', 'tool_choice', 'response_format',
 ] as const;
+// Paid variants of an allowlisted id (`:online` runs web search, `:nitro`
+// picks the fastest paid host, `:floor` the cheapest paid). Never forwarded.
+const PAID_VARIANT_SUFFIX = /:(online|nitro|floor)$/i;
+const MAX_TOKENS_CAP = 8192;
 const UPSTREAM_MODELS = 'https://openrouter.ai/api/v1/models';
 const UPSTREAM_KEY = 'https://openrouter.ai/api/v1/key';
+
+/** OpenRouter's own router can pick a paid model — never allowlisted. */
+const AUTO_ROUTER = /^openrouter\/auto(?:$|[-/:])/i;
 
 // Attribution headers OpenRouter uses for app ranking/limits.
 const ATTRIBUTION_HEADERS = {
@@ -151,46 +169,121 @@ const ATTRIBUTION_HEADERS = {
 type UpstreamModel = {
   id?: unknown;
   name?: unknown;
-  pricing?: { prompt?: unknown; completion?: unknown };
+  pricing?: unknown;
   architecture?: { output_modalities?: unknown };
 };
 
-type ModelInfo = { id: string; name: string; free: boolean; promptPrice: string; completionPrice: string };
+type ModelInfo = {
+  id: string;
+  name: string;
+  free: boolean;
+  /** Free without `:free`: a cloaked/stealth id — usually logs prompts for training. */
+  stealth: boolean;
+  promptPrice: string;
+  completionPrice: string;
+};
 
-const MODELS_TTL_MS = 60 * 60 * 1000;
+const MODELS_TTL_MS = 30 * 60 * 1000;
 let modelsCache: { at: number; models: UpstreamModel[] } | null = null;
+/** Models that reported a non-zero cost. Instance-local, fail-closed. */
+const paidModels = new Set<string>();
 
 const fetchUpstreamModels = async (): Promise<UpstreamModel[]> => {
   if (modelsCache && Date.now() - modelsCache.at < MODELS_TTL_MS) return modelsCache.models;
-  const res = await fetch(UPSTREAM_MODELS, { headers: { Accept: 'application/json' } });
-  if (!res.ok) throw new Error(`models HTTP ${res.status}`);
-  const payload = (await res.json()) as { data?: unknown };
-  const models = Array.isArray(payload.data) ? (payload.data as UpstreamModel[]) : [];
-  modelsCache = { at: Date.now(), models };
-  return models;
+  try {
+    const res = await fetch(UPSTREAM_MODELS, { headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new Error(`models HTTP ${res.status}`);
+    const payload = (await res.json()) as { data?: unknown };
+    const models = Array.isArray(payload.data) ? (payload.data as UpstreamModel[]) : [];
+    if (models.length === 0) throw new Error('models list empty');
+    modelsCache = { at: Date.now(), models };
+    return models;
+  } catch (error) {
+    // A failed refresh keeps serving the last good list; with no list at all
+    // the caller fails closed (503).
+    if (modelsCache) return modelsCache.models;
+    throw error;
+  }
 };
 
-/** Text-output models only (older entries without modality data are kept). */
-const isTextModel = (m: UpstreamModel): boolean =>
-  !Array.isArray(m.architecture?.output_modalities) ||
-  (m.architecture?.output_modalities as unknown[]).includes('text');
+/** Text-output models only: absent modality data is kept, anything that can
+ *  emit audio/image/video is not a chat model and is dropped. */
+const isTextModel = (m: UpstreamModel): boolean => {
+  const out = m.architecture?.output_modalities;
+  if (!Array.isArray(out) || out.length === 0) return true;
+  return out.every((modality) => modality === 'text');
+};
 
-/** Free = id ends `:free` OR both prompt and completion price are 0. */
-const isFreeModel = (m: UpstreamModel): boolean =>
+/**
+ * Free/stealth = EVERY pricing field is zero or absent: prompt, completion,
+ * request, image, web_search, internal_reasoning, input_cache_read,
+ * input_cache_write, audio — and any field OpenRouter adds later (the loop
+ * checks them all, so a new cost field fails closed).
+ */
+const hasZeroPricing = (m: UpstreamModel): boolean => {
+  const pricing = m.pricing;
+  if (pricing === undefined || pricing === null) return true;
+  if (typeof pricing !== 'object') return false;
+  return Object.values(pricing as Record<string, unknown>).every(
+    (value) => value === undefined || value === null || value === '' || Number(value) === 0
+  );
+};
+
+const isAllowlisted = (m: UpstreamModel): boolean =>
   typeof m.id === 'string' &&
-  (m.id.endsWith(':free') ||
-    (Number(m.pricing?.prompt) === 0 && Number(m.pricing?.completion) === 0));
+  isTextModel(m) &&
+  hasZeroPricing(m) &&
+  !AUTO_ROUTER.test(m.id) &&
+  !PAID_VARIANT_SUFFIX.test(m.id) &&
+  !paidModels.has(m.id);
 
-const toModelInfo = (m: UpstreamModel): ModelInfo => ({
-  id: String(m.id),
-  name: typeof m.name === 'string' ? m.name : String(m.id),
-  free: isFreeModel(m),
-  promptPrice: String(m.pricing?.prompt ?? '0'),
-  completionPrice: String(m.pricing?.completion ?? '0'),
-});
+const toModelInfo = (m: UpstreamModel): ModelInfo => {
+  const id = String(m.id);
+  return {
+    id,
+    name: typeof m.name === 'string' ? m.name : id,
+    free: true,
+    // `openrouter/*` ids are OpenRouter's own free routes, not cloaked models.
+    stealth: !id.endsWith(':free') && !id.startsWith('openrouter/'),
+    promptPrice: String((m.pricing as { prompt?: unknown } | undefined)?.prompt ?? '0'),
+    completionPrice: String((m.pricing as { completion?: unknown } | undefined)?.completion ?? '0'),
+  };
+};
 
-const textModels = async (): Promise<ModelInfo[]> =>
-  (await fetchUpstreamModels()).filter((m) => typeof m.id === 'string' && isTextModel(m)).map(toModelInfo);
+/** The one allowlist both modes share. Throws only when there is no list at all. */
+const allowlistedModels = async (): Promise<ModelInfo[]> =>
+  (await fetchUpstreamModels()).filter(isAllowlisted).map(toModelInfo);
+
+/**
+ * A free model that reports a cost was billed anyway: WARN (model id only,
+ * never the key) and denylist it. Reads the stream tail, where OpenRouter puts
+ * the final usage chunk.
+ * shortcut: only cost inside a flat `usage` object is detected, compact JSON.
+ */
+const noteUsageCost = (model: string, text: string): void => {
+  const match = /"usage"\s*:\s*\{[^{}]*?"cost"\s*:\s*([0-9.eE+-]+)/.exec(text);
+  if (match && Number(match[1]) > 0) {
+    paidModels.add(model);
+    console.warn(`[openrouter] non-zero cost reported for ${model} — denylisted`);
+  }
+};
+
+/** Passes the upstream stream through untouched while watching its tail. */
+const guardStream = (body: ReadableStream<Uint8Array>, model: string): ReadableStream<Uint8Array> => {
+  const decoder = new TextDecoder();
+  let tail = '';
+  return body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        controller.enqueue(chunk);
+        tail = (tail + decoder.decode(chunk, { stream: true })).slice(-4096);
+      },
+      flush() {
+        noteUsageCost(model, tail + decoder.decode());
+      },
+    })
+  );
+};
 
 /** BYO key from the request header. Rejects anything that is not a plain token. */
 const readUserKey = (request: Request): string | null => {
@@ -240,24 +333,26 @@ export async function POST(request: Request): Promise<Response> {
   const userKey = readUserKey(request);
   if (userKey === 'invalid') return json({ error: 'Invalid key header' }, 400);
 
-  let apiKey: string;
-  if (userKey) {
-    apiKey = userKey;
-  } else {
-    const serverKey = process.env.OPENROUTER_API_KEY;
-    if (!serverKey) {
-      // Never fall back silently to Chutes (spec: free mode is a distinct mode).
-      return json({ error: 'OpenRouter free mode not configured' }, 503);
-    }
-    apiKey = serverKey;
-    const allowed = new Set((await textModels().catch(() => [])).filter((m) => m.free).map((m) => m.id));
-    if (allowed.size === 0) {
-      return json({ error: 'OpenRouter model list unavailable' }, 502);
-    }
-    if (!allowed.has(model)) {
-      // A paid/non-text model may never run on the platform key.
-      return json({ error: 'Model not available in free mode' }, 400);
-    }
+  const apiKey = userKey || process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    // Never fall back silently to Chutes (spec: free mode is a distinct mode).
+    return json({ error: 'OpenRouter free mode not configured' }, 503);
+  }
+
+  // Free/stealth allowlist in BOTH modes: a BYO key buys the user's own rate
+  // limit, never a paid model (owner decision 2026-11-27).
+  let allowed: Set<string>;
+  try {
+    allowed = new Set((await allowlistedModels()).map((m) => m.id));
+  } catch {
+    // No list at all -> fail closed.
+    return json({ error: 'OpenRouter model list unavailable' }, 503);
+  }
+  if (allowed.size === 0) {
+    return json({ error: 'OpenRouter model list unavailable' }, 503);
+  }
+  if (PAID_VARIANT_SUFFIX.test(model) || !allowed.has(model)) {
+    return json({ error: 'Model not available — free or stealth models only' }, 400);
   }
 
   // Relay chat fields only: OpenRouter `plugins`/`provider` extras can spend the
@@ -268,6 +363,15 @@ export async function POST(request: Request): Promise<Response> {
     if (value !== undefined) relayBody[field] = value;
   }
   relayBody.stream = (chatBody as { stream?: unknown }).stream !== false;
+  if (typeof relayBody.max_tokens === 'number' && Number.isFinite(relayBody.max_tokens)) {
+    relayBody.max_tokens = Math.min(Math.max(1, Math.floor(relayBody.max_tokens)), MAX_TOKENS_CAP);
+  } else {
+    delete relayBody.max_tokens;
+  }
+  // Hard upstream budget guard: OpenRouter refuses to route to anything that
+  // costs money, whatever the model id says (D2d).
+  relayBody.provider = { max_price: { prompt: 0, completion: 0, request: 0, image: 0 } };
+  relayBody.usage = { include: true };
 
   let upstream: Response;
   try {
@@ -309,7 +413,12 @@ export async function POST(request: Request): Promise<Response> {
   const headers = new Headers();
   const contentType = upstream.headers.get('content-type');
   if (contentType) headers.set('Content-Type', contentType);
-  return new Response(upstream.body, { status: upstream.status, headers });
+  if (relayBody.stream === false || !upstream.body) {
+    const text = await upstream.text();
+    noteUsageCost(model, text);
+    return new Response(text, { status: upstream.status, headers });
+  }
+  return new Response(guardStream(upstream.body, model), { status: upstream.status, headers });
 }
 
 export async function GET(request: Request): Promise<Response> {
@@ -325,12 +434,12 @@ export async function GET(request: Request): Promise<Response> {
     if (userKey === 'invalid') return json({ error: 'Invalid key header' }, 400);
     let models: ModelInfo[];
     try {
-      models = await textModels();
+      models = await allowlistedModels();
     } catch {
-      return json({ error: 'OpenRouter model list unavailable' }, 502);
+      return json({ error: 'OpenRouter model list unavailable' }, 503);
     }
-    if (!userKey) models = models.filter((m) => m.free);
-    if (userKey) models.sort((a, b) => Number(b.free) - Number(a.free));
+    // `:free` ids first: they are the ones with a published free pool.
+    models.sort((a, b) => Number(a.stealth) - Number(b.stealth));
     return json({ mode: userKey ? 'byok' : 'server', models });
   }
 
